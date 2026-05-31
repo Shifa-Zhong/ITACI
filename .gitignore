@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+
+# Local virtual envs
+venv/
+.venv/
+env/
+
+# Output directory (results pickle files are reproducible; do not version)
+results/
+
+# Editor & OS noise
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp
+*~
