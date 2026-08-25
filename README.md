@@ -1,17 +1,21 @@
-# ITACI — Decision Boundary Incompatibility in Cross-Endpoint Toxicity Transfer
+# ITACI — Cross-Endpoint Toxicity Transfer under Scaffold-Held-Out Evaluation
 
-Reproducibility code for the manuscript *"Decision Boundary Incompatibility as
-the Central Barrier to Cross-Endpoint Transfer in Computational Toxicology"*.
+Reproducibility code for the manuscript *"Why Does Cross-Endpoint Transfer
+Sometimes Fail in Computational Toxicology? Diagnosing Decision-Boundary
+Incompatibility across 13 Endpoints under Scaffold-Held-Out Evaluation"*.
 
-This repository contains only the **data-generation pipeline** — the scripts
-that load the raw toxicity datasets, build scaffold-disjoint splits, train all
-baseline and cross-endpoint transfer models, and compute every diagnostic
-metric reported in the paper (cross-prediction AUC matrix, JSD, ITACI, SMD,
-overlap statistics). Figure-rendering and manuscript scripts are not included.
+This repository contains only the **data-generation and statistical-analysis
+pipeline**: scripts that load the toxicity datasets, construct scaffold-group
+outer folds, train the baseline and cross-endpoint models, remove target-test
+compound identities from every source-training branch, and calculate the
+reported performance and support diagnostics. Figure rendering, manuscript or
+response-letter generation, and submission-audit code are intentionally not
+included.
 
-Every script writes its outputs into a top-level `results/` directory as
-pickled Python objects, and most checkpoint themselves so they can be
-interrupted and resumed.
+Revised scripts write machine-readable CSV, JSON, and NPZ outputs under
+`results/revision/`. Legacy scripts retain their original pickle checkpoint
+format. Long-running model scripts checkpoint completed endpoint-fold records
+so they can be interrupted and resumed.
 
 ---
 
@@ -27,12 +31,7 @@ python -m venv venv
 source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-# 3. point each script at the data folder
-#    (default paths in the scripts are absolute Windows paths used during
-#     development; either run with the working directory set to the repo
-#     root and edit the DATA_FILE / RESULTS_DIR constants near the top of
-#     each script, or symlink `data/` and `results/` to your preferred
-#     locations.)
+# 3. scripts in scripts/revision use repository-relative data/results paths
 
 mkdir -p results
 ```
@@ -63,7 +62,58 @@ study (one sheet per endpoint, columns `new_s` = canonical SMILES, `label`
 
 ---
 
-## Pipeline order
+## Revised primary pipeline
+
+The final revised analysis is in `scripts/revision/`. It uses two independent
+randomizations of five-fold stratified scaffold-group cross-validation. For
+each target outer fold, every source-dependent method removes all compounds
+whose canonical identity occurs in the target test fold. Model and ensemble
+selection are confined to the corresponding outer-training data.
+
+Run from the repository root:
+
+```bash
+# Build Morgan features and the two-repeat x five-fold baseline OOF predictions
+python scripts/revision/revision_ood_analysis.py --build-features
+python scripts/revision/revision_ood_analysis.py --run
+
+# Leakage-controlled data-level methods and size-matched target-only control
+python scripts/revision/run_clean_source_data_level_scaffold_inner.py --method all
+python scripts/revision/run_clean_source_dl4_scaffold_inner.py
+
+# Higher-level methods
+python scripts/revision/run_clean_source_stacking_independent.py
+python scripts/revision/run_clean_source_mtl_independent.py
+python scripts/revision/run_clean_source_maml_independent.py
+python scripts/revision/run_clean_source_fefa_fully_nested.py
+
+# Leakage-free ordered source-target cross-prediction matrix
+python scripts/revision/run_clean_cross_prediction_independent.py
+
+# Final pooled repeated-OOF metrics, scaffold bootstrap, Wilcoxon/Holm results
+python scripts/revision/analyze_clean_source_independent.py
+python scripts/revision/analyze_clean_cross_prediction_independent.py
+
+# Optional Mordred-PCA nearest-neighbour support sensitivity
+python scripts/revision/revision_mordred_similarity.py
+```
+
+The revised outputs are written under:
+
+- `results/revision/ood_analysis/`
+- `results/revision/clean_source_independent/`
+
+The fully nested FEFA runner can be distributed across workers with
+`--shard-id` and `--shard-count`; use `--merge-only` with the same shard count
+after all shards finish. The default single-process invocation writes the
+canonical `fefa_clean_results_fully_nested.json` directly.
+
+No script in `scripts/revision/` creates a figure, edits a DOCX file, or audits
+submission formatting.
+
+---
+
+## Legacy/original pipeline order
 
 Run scripts in the order below; later scripts consume the pickle files
 produced by earlier ones. Anything Mordred-related is optional — the central
@@ -130,12 +180,15 @@ the cross-representation robustness check.
 
 ## Reproducibility notes
 
-- All `step_scaffold_*` scripts use **Bemis–Murcko scaffold-disjoint 80/20
-  splits** as the primary protocol, repeated `N = 10` times with seeds 101–110.
-  The earlier non-`scaffold_*` outputs (e.g. `baseline_results.pkl`) come from
-  random splits and are only used as a within-scaffold contrast.
-- Hyperparameter optimisation: LightGBM via TPE (50 evaluations, 5-fold CV).
-  Search spaces are inlined in each script.
+- The revised primary protocol in `scripts/revision/` is **two independent
+  randomizations × five outer scaffold-group folds**. The older
+  `step_scaffold_*` scripts below use repeated scaffold-disjoint 80/20 splits
+  and are retained for historical reproducibility and sensitivity analyses;
+  they are not the revised primary estimand.
+- Revised LightGBM selection uses a prespecified finite candidate set within
+  scaffold-grouped inner folds; fully nested FEFA uses TPE only on fold-specific
+  inner embeddings. The legacy scripts retain their original TPE settings.
+  Search spaces are inlined in the corresponding scripts.
 - Neural network strategies (MTL / MAML / FEFA / diversity control) require
   PyTorch and a GPU is recommended (CPU works but is ~10× slower).
 - Mordred descriptors take ~1–2 hours on a modern CPU; `mordred_datasets.pkl`
